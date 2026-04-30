@@ -7,17 +7,16 @@ import json
 import os
 import pika
 
+from config import get_data_file, get_rabbitmq_connection_parameters
 from datosCent import Cliente, ClienteRegistro, ClienteUpdate, bd_clientes
 
 SECRET_KEY = "tu_llave_secreta_super_segura_123"
 ALGORITHM = "HS256"
 security = HTTPBearer()
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
-
-FILE_NAME = "clientes.csv"
+FILE_NAME = get_data_file("CLIENTES_CSV", "clientes.csv")
 HEADERS = ["id_cliente", "nombre", "correo", "direccion", "telefono"]
 
-if not os.path.exists(FILE_NAME):
+if not FILE_NAME.exists():
     with open(FILE_NAME, "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(HEADERS)
 
@@ -48,7 +47,7 @@ app = FastAPI(
 
 def enviar_evento(tipo_evento, data):
     try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        connection = pika.BlockingConnection(get_rabbitmq_connection_parameters())
         channel = connection.channel()
         channel.queue_declare(queue="clientes", durable=True)
 
@@ -66,6 +65,11 @@ def enviar_evento(tipo_evento, data):
         connection.close()
     except Exception as e:
         print("Error enviando a RabbitMQ:", e)
+
+
+@app.get("/health", tags=["Infra"])
+def health_check():
+    return {"status": "ok", "service": "clientes"}
 
 
 @app.get("/clientes", response_model=List[Cliente])

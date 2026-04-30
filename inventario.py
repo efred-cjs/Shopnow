@@ -6,10 +6,10 @@ import os
 import pika
 import requests
 import threading
+import time
 
+from config import get_data_file, get_rabbitmq_connection_parameters, get_service_url
 from datosCent import Inventario, InventarioRegistro, InventarioUpdate, bd_inventario
-
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 
 app = FastAPI(
     title="API de Inventario",
@@ -24,53 +24,65 @@ app = FastAPI(
 
 
 def consumir_pedidos():
-    try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
-        channel = connection.channel()
-        channel.queue_declare(queue="pedidos", durable=True)
+    while True:
+        try:
+            connection = pika.BlockingConnection(get_rabbitmq_connection_parameters())
+            channel = connection.channel()
+            channel.queue_declare(queue="pedidos", durable=True)
 
-        def callback(ch, method, properties, body):
-            mensaje = json.loads(body)
+            def callback(ch, method, properties, body):
+                mensaje = json.loads(body)
 
-            if mensaje.get("evento") != "pedido_creado":
-                return
+                if mensaje.get("evento") != "pedido_creado":
+                    return
 
-            data = mensaje["data"]
-            id_producto = data["id_producto"]
-            cantidad = data["cantidad"]
+                data = mensaje["data"]
+                id_producto = data["id_producto"]
+                cantidad = data["cantidad"]
 
-            item = next((i for i in bd_inventario if i.id_producto == id_producto), None)
-            if item is None:
-                print("Producto no existe en inventario")
-                return
+                item = next((i for i in bd_inventario if i.id_producto == id_producto), None)
+                if item is None:
+                    print("Producto no existe en inventario")
+                    return
 
-            if item.cantidad < cantidad:
-                print("Stock insuficiente")
-                return
+                if item.cantidad < cantidad:
+                    print("Stock insuficiente")
+                    return
 
-            item.cantidad -= cantidad
-            guardar_inventarios(bd_inventario)
-            print(f"Stock actualizado: {item.cantidad}")
+                item.cantidad -= cantidad
+                guardar_inventarios(bd_inventario)
+                print(f"Stock actualizado: {item.cantidad}")
 
-        channel.basic_consume(
-            queue="pedidos",
-            on_message_callback=callback,
-            auto_ack=True,
-        )
-        print("Inventario escuchando pedidos...")
-        channel.start_consuming()
-    except Exception as e:
-        print("Error en consumidor:", e)
+            channel.basic_consume(
+                queue="pedidos",
+                on_message_callback=callback,
+                auto_ack=True,
+            )
+            print("Inventario escuchando pedidos...")
+            channel.start_consuming()
+        except Exception as e:
+            print("Error en consumidor:", e)
+            time.sleep(5)
 
 
-puerto_productos = os.getenv("PRODUCTOS_URL", "http://127.0.0.1:8001")
+puerto_productos = get_service_url(
+    "PRODUCTOS_URL",
+    "PRODUCTOS_HOST",
+    "PRODUCTOS_PORT",
+    "http://127.0.0.1:8001",
+)
 
-FILE_NAME = "inventario.csv"
+FILE_NAME = get_data_file("INVENTARIO_CSV", "inventario.csv")
 HEADERS = ["id_producto", "cantidad"]
 
-if not os.path.exists(FILE_NAME):
+if not FILE_NAME.exists():
     with open(FILE_NAME, "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(HEADERS)
+
+
+@app.get("/health", tags=["Infra"])
+def health_check():
+    return {"status": "ok", "service": "inventario"}
 
 
 @app.get("/inventario", response_model=List[Inventario])

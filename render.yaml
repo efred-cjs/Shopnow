@@ -1,0 +1,202 @@
+services:
+  - type: pserv
+    name: rabbitcode-rabbitmq
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./infra/rabbitmq/Dockerfile
+    dockerContext: ./infra/rabbitmq
+    disk:
+      name: rabbitmq-data
+      mountPath: /var/lib/rabbitmq
+      sizeGB: 10
+    envVars:
+      - key: RABBITMQ_DEFAULT_USER
+        value: rabbitcode
+      - key: RABBITMQ_DEFAULT_PASS
+        generateValue: true
+      - key: RABBITMQ_ERLANG_COOKIE
+        generateValue: true
+
+  - type: web
+    name: rabbitcode-clientes
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn clientes:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: clientes-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: DATA_DIR
+        value: /var/data
+      - key: CLIENTES_CSV
+        value: /var/data/clientes.csv
+      - key: RABBITMQ_HOST
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          property: host
+      - key: RABBITMQ_PORT
+        value: 5672
+      - key: RABBITMQ_USER
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          envVarKey: RABBITMQ_DEFAULT_USER
+      - key: RABBITMQ_PASS
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          envVarKey: RABBITMQ_DEFAULT_PASS
+
+  - type: web
+    name: rabbitcode-productos
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn productos:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: productos-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: 8001
+      - key: DATA_DIR
+        value: /var/data
+      - key: PRODUCTOS_CSV
+        value: /var/data/productos.csv
+      - key: RABBITMQ_HOST
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          property: host
+      - key: RABBITMQ_PORT
+        value: 5672
+      - key: RABBITMQ_USER
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          envVarKey: RABBITMQ_DEFAULT_USER
+      - key: RABBITMQ_PASS
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          envVarKey: RABBITMQ_DEFAULT_PASS
+
+  - type: web
+    name: rabbitcode-inventario
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn inventario:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: inventario-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: 8003
+      - key: DATA_DIR
+        value: /var/data
+      - key: INVENTARIO_CSV
+        value: /var/data/inventario.csv
+      - key: PRODUCTOS_HOST
+        fromService:
+          type: web
+          name: rabbitcode-productos
+          property: host
+      - key: PRODUCTOS_PORT
+        fromService:
+          type: web
+          name: rabbitcode-productos
+          property: port
+      - key: RABBITMQ_HOST
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          property: host
+      - key: RABBITMQ_PORT
+        value: 5672
+      - key: RABBITMQ_USER
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          envVarKey: RABBITMQ_DEFAULT_USER
+      - key: RABBITMQ_PASS
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          envVarKey: RABBITMQ_DEFAULT_PASS
+
+  - type: web
+    name: rabbitcode-pedidos
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn pedidos:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: pedidos-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: 8002
+      - key: DATA_DIR
+        value: /var/data
+      - key: PEDIDOS_CSV
+        value: /var/data/pedidos.csv
+      - key: CLIENTES_HOST
+        fromService:
+          type: web
+          name: rabbitcode-clientes
+          property: host
+      - key: CLIENTES_PORT
+        fromService:
+          type: web
+          name: rabbitcode-clientes
+          property: port
+      - key: PRODUCTOS_HOST
+        fromService:
+          type: web
+          name: rabbitcode-productos
+          property: host
+      - key: PRODUCTOS_PORT
+        fromService:
+          type: web
+          name: rabbitcode-productos
+          property: port
+      - key: INVENTARIO_HOST
+        fromService:
+          type: web
+          name: rabbitcode-inventario
+          property: host
+      - key: INVENTARIO_PORT
+        fromService:
+          type: web
+          name: rabbitcode-inventario
+          property: port
+      - key: RABBITMQ_HOST
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          property: host
+      - key: RABBITMQ_PORT
+        value: 5672
+      - key: RABBITMQ_USER
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          envVarKey: RABBITMQ_DEFAULT_USER
+      - key: RABBITMQ_PASS
+        fromService:
+          type: pserv
+          name: rabbitcode-rabbitmq
+          envVarKey: RABBITMQ_DEFAULT_PASS

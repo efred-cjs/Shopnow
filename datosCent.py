@@ -1,6 +1,8 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 
+from config import get_data_file
+
 """
 INICIO DE CLIENTES
 """
@@ -29,7 +31,7 @@ class ClienteUpdate(BaseModel):
 def up_clientes():
     lista = []
     try:
-        with open("clientes.csv", "r", encoding="utf-8") as f:
+        with open(get_data_file("CLIENTES_CSV", "clientes.csv"), "r", encoding="utf-8") as f:
             for linea in f.readlines()[1:]:
                 datos = linea.strip().split(",")
                 if len(datos) == 5:
@@ -66,7 +68,7 @@ class ProductoUpdate(BaseModel):
 def up_productos():
     lista = []
     try:
-        with open("productos.csv", "r", encoding="utf-8") as f:
+        with open(get_data_file("PRODUCTOS_CSV", "productos.csv"), "r", encoding="utf-8") as f:
             for linea in f.readlines()[1:]:
                 datos = linea.strip().split(",")
                 if len(datos) == 3:
@@ -103,7 +105,7 @@ class InventarioUpdate(BaseModel):
 def update_inventario():
     lista = []
     try:
-        with open("inventario.csv", "r", encoding="utf-8") as f:
+        with open(get_data_file("INVENTARIO_CSV", "inventario.csv"), "r", encoding="utf-8") as f:
             for linea in f.readlines()[1:]:
                 datos = linea.strip().split(",")
                 if len(datos) == 2:
@@ -145,7 +147,7 @@ class PedidoUpdate(BaseModel):
 def update_pedidos():
     lista = []
     try:
-        with open("pedidos.csv", "r", encoding="utf-8") as f:
+        with open(get_data_file("PEDIDOS_CSV", "pedidos.csv"), "r", encoding="utf-8") as f:
             for linea in f.readlines()[1:]:
                 datos = linea.strip().split(",")
                 if len(datos) == 5:

@@ -5,9 +5,8 @@ import json
 import os
 import pika
 
+from config import get_data_file, get_rabbitmq_connection_parameters
 from datosCent import Producto, ProductoRegistro, ProductoUpdate, bd_productos
-
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 
 app = FastAPI(
     title="API de Productos",
@@ -23,7 +22,7 @@ app = FastAPI(
 
 def enviar_evento_producto(tipo_evento, data):
     try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        connection = pika.BlockingConnection(get_rabbitmq_connection_parameters())
         channel = connection.channel()
         channel.queue_declare(queue="productos", durable=True)
 
@@ -43,12 +42,17 @@ def enviar_evento_producto(tipo_evento, data):
         print("Error enviando a RabbitMQ:", e)
 
 
-FILE_NAME = "productos.csv"
+FILE_NAME = get_data_file("PRODUCTOS_CSV", "productos.csv")
 HEADERS = ["id_producto", "descripcion", "costo"]
 
-if not os.path.exists(FILE_NAME):
+if not FILE_NAME.exists():
     with open(FILE_NAME, "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(HEADERS)
+
+
+@app.get("/health", tags=["Infra"])
+def health_check():
+    return {"status": "ok", "service": "productos"}
 
 
 @app.get("/productos", response_model=List[Producto])

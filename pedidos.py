@@ -6,9 +6,8 @@ import os
 import pika
 import requests
 
+from config import get_data_file, get_rabbitmq_connection_parameters, get_service_url
 from datosCent import Pedido, PedidoUpdate, bd_pedidos
-
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 
 app = FastAPI(
     title="API de Pedidos",
@@ -24,7 +23,7 @@ app = FastAPI(
 
 def enviar_pedido_evento(data):
     try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        connection = pika.BlockingConnection(get_rabbitmq_connection_parameters())
         channel = connection.channel()
         channel.queue_declare(queue="pedidos", durable=True)
         channel.basic_publish(
@@ -38,16 +37,36 @@ def enviar_pedido_evento(data):
         print("Error enviando a RabbitMQ:", e)
 
 
-puerto_clientes = os.getenv("CLIENTES_URL", "http://127.0.0.1:8000")
-puerto_productos = os.getenv("PRODUCTOS_URL", "http://127.0.0.1:8001")
-puerto_inventario = os.getenv("INVENTARIO_URL", "http://127.0.0.1:8003")
+puerto_clientes = get_service_url(
+    "CLIENTES_URL",
+    "CLIENTES_HOST",
+    "CLIENTES_PORT",
+    "http://127.0.0.1:8000",
+)
+puerto_productos = get_service_url(
+    "PRODUCTOS_URL",
+    "PRODUCTOS_HOST",
+    "PRODUCTOS_PORT",
+    "http://127.0.0.1:8001",
+)
+puerto_inventario = get_service_url(
+    "INVENTARIO_URL",
+    "INVENTARIO_HOST",
+    "INVENTARIO_PORT",
+    "http://127.0.0.1:8003",
+)
 
-FILE_NAME = "pedidos.csv"
+FILE_NAME = get_data_file("PEDIDOS_CSV", "pedidos.csv")
 HEADERS = ["id_pedido", "id_producto", "id_cliente", "cantidad", "costo"]
 
-if not os.path.exists(FILE_NAME):
+if not FILE_NAME.exists():
     with open(FILE_NAME, "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(HEADERS)
+
+
+@app.get("/health", tags=["Infra"])
+def health_check():
+    return {"status": "ok", "service": "pedidos"}
 
 
 @app.get("/pedidos", response_model=List[Pedido])
