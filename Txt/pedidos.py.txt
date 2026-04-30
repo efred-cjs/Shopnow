@@ -1,0 +1,203 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, EmailStr
+from typing import List, Optional
+import requests
+import csv 
+import os 
+
+from datosCent import Pedido, PedidoRegistro, PedidoUpdate, bd_pedidos
+
+app = FastAPI(
+    title="API de Pedidos",
+    description="Este es el servicio encargado de llevar el registro de pedidos de la empresa. \n\n" \
+    "Esta api actua como almacenamiento de los pedidos sobre los productos que hay en existencia. \n\n" \
+    "Ejecutar en puerto 8002 y los demas servicios en su respectivo puerto tal como:Clientes(8000), Pedidos (8002) y Productos (8001) e inventario(8003)",
+    version="1.4.0",
+    contact={
+        "name": "Efren Camilo Jimenez Suarez ISC, Tecnm Queretaro",
+    }
+)
+
+
+puerto_clientes = "http://127.0.0.1:8000"
+puerto_productos = "http://127.0.0.1:8001"
+puerto_inventario = "http://127.0.0.1:8003"
+
+
+FILE_NAME = "pedidos.csv"
+HEADERS = ["id_pedido", "id_producto", "id_cliente", "cantidad", "costo"]
+
+if not os.path.exists(FILE_NAME):
+    with open(FILE_NAME, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow(HEADERS)
+
+@app.get("/pedido",response_model=List[Pedido])
+def obtener_pedido():
+    return bd_pedidos
+
+tags=["Consulta de pedido"],
+summary="Obtener el pedido",
+status_code=200,
+responses={
+        200: {
+            "description": "Pedido",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id_pedido": 1,
+                            "id_producto": 1,
+                            "id_cliente": 1,
+                            "cantidad": 3,
+                            "costo":200
+                        }
+                    ]
+                }
+            }
+        }
+    }
+
+
+def guardar_pedido(pedidos: List[Pedido]):
+    with open("pedido.csv", "w", encoding="utf-8") as f:
+        f.write("id_producto,cantidad\n")
+        
+        for c in pedidos:
+            f.write(f"{c.id_pedido},{c.id_cliente},{c.id_producto},{c.cantidad},{c.costo},\n")
+
+@app.post("/pedidos")
+def registrar_pedido(nuevo_pedido: Pedido):
+
+    # Validar PK
+    for p in bd_pedidos:
+        if p.id_pedido == nuevo_pedido.id_pedido:
+            raise HTTPException(
+                status_code=400,
+                detail="El pedido ya existe."
+            )
+
+    # Validar FK clientes y productos
+    try:
+        resp_clientes = requests.get(f"{puerto_clientes}/clientes")
+        clientes = resp_clientes.json()
+
+        cliente_existe = False
+        for c in clientes:
+            if c["id_cliente"] == nuevo_pedido.id_cliente:
+                cliente_existe = True
+                break
+
+        if not cliente_existe:
+            raise HTTPException(
+                status_code=404,
+                detail="El cliente no existe."
+            )
+
+        resp_productos = requests.get(f"{puerto_productos}/productos")
+        productos = resp_productos.json()
+
+        producto_existe = False
+        for p in productos:
+            if p["id_producto"] == nuevo_pedido.id_producto:
+                producto_existe = True
+                break
+
+        if not producto_existe:
+            raise HTTPException(
+                status_code=404,
+                detail="El producto no existe."
+            )
+
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(
+            status_code=503,
+            detail="Error de conexión con los microservicios base."
+        )
+
+    # Descontar stock del inventario
+    datos_descuento = {"cantidad": nuevo_pedido.cantidad}
+
+    try:
+        resp_inv = requests.put(
+            f"{puerto_inventario}/inventario/descontar/{nuevo_pedido.id_producto}",
+            json=datos_descuento
+        )
+
+        if resp_inv.status_code != 200:
+            raise HTTPException(
+                status_code=resp_inv.status_code,
+                detail=resp_inv.json().get("detail")
+            )
+
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(
+            status_code=503,
+            detail="El servicio de Inventario no responde."
+        )
+
+    bd_pedidos.append(nuevo_pedido)
+    guardar_pedido(bd_pedidos)
+
+    return {
+        "mensaje": "Pedido exitoso",
+        "datos": nuevo_pedido
+    }
+
+@app.patch("/pedidos/{id_pedido}")
+def actualizar_pedido(id_pedido: int, datos_nuevos: PedidoUpdate):
+
+    pedido = None
+
+    for p in bd_pedidos:
+        if p.id_pedido == id_pedido:
+            pedido = p
+            break
+
+    if pedido is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Pedido no encontrado"
+        )
+
+    if datos_nuevos.cantidad != None and datos_nuevos.cantidad != pedido.cantidad:
+
+        diferencia = datos_nuevos.cantidad - pedido.cantidad
+
+        try:
+            resp_inv = requests.get(f"{puerto_inventario}/inventario")
+            inventario = resp_inv.json()
+
+            item = None
+            for i in inventario:
+                if i["id_producto"] == pedido.id_producto:
+                    item = i
+                    break
+
+            if item:
+                nuevo_stock = item["cantidad"] - diferencia
+
+                if nuevo_stock < 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Stock insuficiente para aumentar el pedido."
+                    )
+
+                requests.patch(
+                    f"{puerto_inventario}/inventario/{pedido.id_producto}",
+                    json={"cantidad": nuevo_stock}
+                )
+
+        except requests.exceptions.ConnectionError:
+            raise HTTPException(
+                status_code=503,
+                detail="No se pudo validar el inventario."
+            )
+
+        pedido.cantidad = datos_nuevos.cantidad
+
+    guardar_pedido(bd_pedidos)
+
+    return {
+        "mensaje": "Pedido actualizado",
+        "datos": pedido
+    }

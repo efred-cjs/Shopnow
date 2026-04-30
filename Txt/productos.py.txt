@@ -1,0 +1,97 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, EmailStr
+from typing import Optional, List
+import csv 
+import os 
+from datosCent import Producto, ProductoRegistro, ProductoUpdate,  bd_productos
+
+app = FastAPI(
+    title="API de Productos",
+    description="Este es el servicio encargado del registro basico de los productos de la empresa. \n\n" \
+    "Esta api actua como almacenamiento de validacion de productos. \n\n" \
+    "Ejecutar en puerto 8001 y los demas servicios en su respectivo puerto tal como: Pedidos (8002) y Productos (8001)",
+    version="1.0.0",
+    contact={
+        "name": "Efren Camilo Jimenez Suarez ISC, Tecnm Queretaro",
+    }
+)
+
+
+FILE_NAME = "productos.csv"
+HEADERS = ["id_producto", "descripcion", "costo"]
+
+if not os.path.exists(FILE_NAME):
+    with open(FILE_NAME, "w", newline="", encoding="utf-8") as f:
+        #por defecto
+        csv.writer(f).writerow(HEADERS)
+
+
+@app.get("/productos",response_model=List[Producto])
+def obtener_productos():
+    return bd_productos
+
+tags=["Consultas de producto"],
+summary="Obtener lista de productos",
+status_code=200,
+responses={
+        200: {
+            "description": "Lista de productos obtenida",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id_producto": 1,
+                            "descripcion": "Impresora",
+                            "precio": 5000
+                        }
+                    ]
+                }
+            }
+        }
+    }
+
+
+def guardar_productos(productos: List[Producto]):
+    with open("productos.csv", "w", encoding="utf-8") as f:
+        f.write("id_producto,descripcion,costo\n")
+        
+        for c in productos:
+            f.write(f"{c.id_producto},{c.descripcion},{c.costo}\n")
+
+@app.post("/productos")
+def registrar_producto(nuevo_producto: ProductoRegistro):
+    if any(c.id_producto == nuevo_producto.id_producto for c in bd_productos):#Verifica si no hay existentes
+        raise HTTPException(status_code=400, detail="Ya existe este producto.")
+    
+    bd_productos.append(nuevo_producto)
+    return {"Alerta": "Producto registrado exitosamente"}
+
+@app.delete("/productos/{id_producto}")
+def eliminar_producto(id_producto: int):
+    borrar_producto = next((c for c in bd_productos if c.id_producto == id_producto), None)#Busca el cliente
+    if not borrar_producto:
+        raise HTTPException(status_code=404, detail=f"No se encontraron productos registrados con este ID {id_producto}")
+    
+    bd_productos.remove(borrar_producto)
+    guardar_productos(bd_productos)
+    return {"Alerta": f"El producto {id_producto} ha sido eliminado exitosamente de la memoria"}
+
+@app.patch("/producto/{id_producto}")
+def actualizar_producto(id_producto: int, update_datos: ProductoUpdate):
+    producto_update= next((c for c in bd_productos if c.id_producto == id_producto), None)
+
+    if not producto_update:
+        raise HTTPException(status_code=404, detail=f"No se encontró el producto con ID {id_producto}")
+    
+    #Actualiza los datos:
+    if update_datos.descripcion is not None:
+        producto_update.descripcion = update_datos.descripcion
+
+    if update_datos.costo is not None:
+        producto_update.costo = update_datos.costo
+
+    guardar_productos(bd_productos)
+    return {"mensaje": "Cliente actualizado correctamente", "datos": producto_update}
+
+
+
