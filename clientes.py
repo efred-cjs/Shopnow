@@ -7,7 +7,7 @@ import json
 import os
 import pika
 
-from config import get_data_file, get_rabbitmq_connection_parameters
+from config import get_data_file, get_rabbitmq_connection_parameters, is_rabbitmq_enabled
 from datosCent import Cliente, ClienteRegistro, ClienteUpdate, bd_clientes
 
 SECRET_KEY = "tu_llave_secreta_super_segura_123"
@@ -46,6 +46,8 @@ app = FastAPI(
 
 
 def enviar_evento(tipo_evento, data):
+    if not is_rabbitmq_enabled():
+        return
     try:
         connection = pika.BlockingConnection(get_rabbitmq_connection_parameters())
         channel = connection.channel()

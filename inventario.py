@@ -8,7 +8,7 @@ import requests
 import threading
 import time
 
-from config import get_data_file, get_rabbitmq_connection_parameters, get_service_url
+from config import get_data_file, get_rabbitmq_connection_parameters, get_service_url, is_rabbitmq_enabled
 from datosCent import Inventario, InventarioRegistro, InventarioUpdate, bd_inventario
 
 app = FastAPI(
@@ -173,5 +173,9 @@ def actualizar_inventario(id_producto: int, datos_nuevos: InventarioUpdate):
 
 @app.on_event("startup")
 def iniciar_consumidor():
+    if not is_rabbitmq_enabled():
+        print("RabbitMQ deshabilitado: inventario operando solo por HTTP.")
+        return
+
     hilo = threading.Thread(target=consumir_pedidos, daemon=True)
     hilo.start()

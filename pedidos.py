@@ -6,7 +6,7 @@ import os
 import pika
 import requests
 
-from config import get_data_file, get_rabbitmq_connection_parameters, get_service_url
+from config import get_data_file, get_rabbitmq_connection_parameters, get_service_url, is_rabbitmq_enabled
 from datosCent import Pedido, PedidoUpdate, bd_pedidos
 
 app = FastAPI(
@@ -22,6 +22,8 @@ app = FastAPI(
 
 
 def enviar_pedido_evento(data):
+    if not is_rabbitmq_enabled():
+        return
     try:
         connection = pika.BlockingConnection(get_rabbitmq_connection_parameters())
         channel = connection.channel()
@@ -82,12 +84,28 @@ def guardar_pedido(pedidos: List[Pedido]):
 
 
 def obtener_inventario_producto(id_producto: int):
-    resp_inv = requests.get(f"{puerto_inventario}/inventario")
+    resp_inv = requests.get(f"{puerto_inventario}/inventario", timeout=10)
     if resp_inv.status_code != 200:
         raise HTTPException(status_code=503, detail="No se pudo consultar el inventario.")
 
     inventario = resp_inv.json()
     return next((i for i in inventario if i["id_producto"] == id_producto), None)
+
+
+def descontar_inventario_http(id_producto: int, cantidad: int):
+    respuesta = requests.put(
+        f"{puerto_inventario}/inventario/descontar/{id_producto}",
+        json={"cantidad": cantidad},
+        timeout=10,
+    )
+    if respuesta.status_code != 200:
+        try:
+            detalle = respuesta.json().get("detail")
+        except ValueError:
+            detalle = None
+        raise HTTPException(status_code=respuesta.status_code, detail=detalle or "No se pudo descontar inventario.")
+
+    return respuesta.json()
 
 
 @app.post("/pedidos")
@@ -97,7 +115,7 @@ def registrar_pedido(nuevo_pedido: Pedido):
             raise HTTPException(status_code=400, detail="El pedido ya existe.")
 
     try:
-        resp_clientes = requests.get(f"{puerto_clientes}/clientes")
+        resp_clientes = requests.get(f"{puerto_clientes}/clientes", timeout=10)
         if resp_clientes.status_code != 200:
             raise HTTPException(status_code=503, detail="Error en servicio de clientes")
         clientes = resp_clientes.json()
@@ -106,7 +124,7 @@ def registrar_pedido(nuevo_pedido: Pedido):
         if not cliente_existe:
             raise HTTPException(status_code=404, detail="El cliente no existe.")
 
-        resp_productos = requests.get(f"{puerto_productos}/productos")
+        resp_productos = requests.get(f"{puerto_productos}/productos", timeout=10)
         if resp_productos.status_code != 200:
             raise HTTPException(status_code=503, detail="Error en servicio de productos")
         productos = resp_productos.json()
@@ -121,18 +139,29 @@ def registrar_pedido(nuevo_pedido: Pedido):
         if item_inventario["cantidad"] < nuevo_pedido.cantidad:
             raise HTTPException(status_code=400, detail="Stock insuficiente para registrar el pedido.")
 
-    except requests.exceptions.ConnectionError:
+    except requests.exceptions.RequestException:
         raise HTTPException(status_code=503, detail="Error de conexion con los microservicios base.")
 
     bd_pedidos.append(nuevo_pedido)
-    guardar_pedido(bd_pedidos)
 
-    enviar_pedido_evento(
-        {
-            "evento": "pedido_creado",
-            "data": nuevo_pedido.dict(),
-        }
-    )
+    if is_rabbitmq_enabled():
+        guardar_pedido(bd_pedidos)
+        enviar_pedido_evento(
+            {
+                "evento": "pedido_creado",
+                "data": nuevo_pedido.dict(),
+            }
+        )
+    else:
+        try:
+            descontar_inventario_http(nuevo_pedido.id_producto, nuevo_pedido.cantidad)
+        except HTTPException:
+            bd_pedidos.pop()
+            raise
+        except requests.exceptions.RequestException:
+            bd_pedidos.pop()
+            raise HTTPException(status_code=503, detail="No se pudo descontar inventario.")
+        guardar_pedido(bd_pedidos)
 
     return {"mensaje": "Pedido exitoso", "datos": nuevo_pedido}
 
@@ -149,7 +178,7 @@ def actualizar_pedido(id_pedido: int, datos_nuevos: PedidoUpdate):
 
         try:
             item = obtener_inventario_producto(pedido.id_producto)
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.RequestException:
             raise HTTPException(status_code=503, detail="No se pudo validar el inventario.")
 
         if item is None:
@@ -162,6 +191,7 @@ def actualizar_pedido(id_pedido: int, datos_nuevos: PedidoUpdate):
         respuesta_patch = requests.patch(
             f"{puerto_inventario}/inventario/{pedido.id_producto}",
             json={"cantidad": nuevo_stock},
+            timeout=10,
         )
         if respuesta_patch.status_code != 200:
             raise HTTPException(status_code=503, detail="No se pudo actualizar el inventario.")

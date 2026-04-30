@@ -15,6 +15,10 @@ def get_data_file(env_var: str, filename: str) -> Path:
     return path
 
 
+def is_rabbitmq_enabled() -> bool:
+    return os.getenv("ENABLE_RABBITMQ", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def get_service_url(
     url_env: str,
     host_env: str,
